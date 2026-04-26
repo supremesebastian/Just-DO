@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Just Do – AI Study Coach</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#4A7CFF" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <!-- iOS specific -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Just Do" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="apple-touch-startup-image" href="icon-512.png" />
+  <!-- iPad specific -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <script>
+    // Kill ALL service workers and caches immediately (fixes stale cache issues)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+      if (window.caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+    }
+  </script>
+  <script src="config.js"></script>
+  <!-- Firebase SDK (compat) with error handling -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadError='app'"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js" onerror="window._fbLoadError='auth'"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js" onerror="window._fbLoadError='firestore'"></script>
+  <script>
+    // If Firebase failed to load, create stubs so app still renders
+    if (!window.firebase) {
+      window.firebase = { apps: [], initializeApp: ()=>({}), auth: ()=>({ onAuthStateChanged: cb=>{ setTimeout(()=>cb(null),100); return ()=>{}; }, signInWithRedirect: ()=>Promise.resolve(), signOut: ()=>Promise.resolve(), getRedirectResult: ()=>Promise.resolve(null) }), firestore: ()=>({ enablePersistence: ()=>Promise.resolve(), collection: ()=>({}) }) };
+    }
+  </script>
+  <script src="firebase-service.js" onerror="console.warn('firebase-service.js failed to load')"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; overflow-x: hidden;
+      transition: background 0.5s ease;
+      /* Safe area for notch/home indicator */
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+    .canvas {
+      display: flex; align-items: flex-start; justify-content: center;
+      gap: 48px; padding: 48px 40px;
+      min-height: 100vh; flex-wrap: wrap;
+    }
+    .frame-col {
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+    }
+    .frame-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+      font-weight: 500;
+    }
+    ::-webkit-scrollbar { display: none; }
+    * { scrollbar-width: none; }
+  </style>
+</head>
+<body>
+
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="just-do-app.jsx"></script>
+<script type="text/babel" src="auth-screen.jsx"></script>
+<script type="text/babel" src="materials-screen.jsx"></script>
+<script type="text/babel" src="flashcards-screen.jsx"></script>
+<script type="text/babel" src="onboarding-screen.jsx"></script>
+<script type="text/babel" src="exams-notifications.jsx"></script>
+
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "showBothVariants": false,
+  "activeVariant": "dark"
+}/*EDITMODE-END*/;
+
+/* ── Helpers ─────────────────────────────────────────── */
+const lsGet = (k, fb) => { try { const v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : fb; } catch { return fb; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} };
+
+/* ── Phone Frame Wrapper ──────────────────────────────── */
+function PhoneApp({ variant, user, onLogin, onLogout, onOnboarded }) {
+  const themeKey = lsGet("justdo_theme", variant);
+  const isDark = themeKey === "dark" || (themeKey !== "light" && variant === "dark");
+  // Re-check onboarding status on every render (user._ts changes after onboarding)
+  const needsOnboarding = user && !lsGet(`justdo_onboarded_${user.uid}`, false);
+
+  const ua = navigator.userAgent;
+  const isIpad = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const isIphone = /iPhone/.test(ua);
+  const isMobile = isIpad || isIphone || /Android/.test(ua);
+
+  const content = !user
+    ? <AuthScreen themeKey={variant} onLogin={onLogin} />
+    : needsOnboarding
+    ? <OnboardingScreen user={user} themeKey={variant} onComplete={(profile) => {
+        // Ensure flag is set before triggering re-render
+        try { localStorage.setItem(`justdo_onboarded_${user.uid}`, JSON.stringify("1")); } catch(e) {}
+        onOnboarded(profile);
+      }} />
+    : <JustDoApp initialTheme={variant} user={user} onLogout={onLogout} />;
+
+  // iPad: full screen, no device frame
+  if (isIpad) return (
+    <div style={{position:"fixed", inset:0, overflow:"hidden", background: isDark ? "#09090E" : "#EFF1FA"}}>
+      {content}
+    </div>
+  );
+
+  // iPhone: full screen, no device frame
+  if (isIphone || (/Android/.test(ua))) return (
+    <div style={{position:"fixed", inset:0, overflow:"hidden"}}>
+      {content}
+    </div>
+  );
+
+  // Desktop: show iOS device frame
+  return (
+    <IOSDevice statusBarStyle={isDark ? "light" : "dark"}>
+      {content}
+    </IOSDevice>
+  );
+}
+
+/* ── Root ─────────────────────────────────────────────── */
+function Root() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [user, setUser] = useState(() => lsGet("justdo_user", null));
+  const [fbChecked, setFbChecked] = useState(false);
+
+  // Detect if running inside the design sandbox iframe
+  const inSandbox = window.self !== window.top;
+
+  useEffect(() => {
+    document.body.style.background = "#09090E";
+    document.body.style.display = "block";
+    document.body.style.padding = "0";
+  }, []);
+
+  const dbg = (msg) => {
+    console.log(msg);
+    const el = document.getElementById('debug-log');
+    if (el) el.textContent += msg + '\n';
+  };
+
+  useEffect(() => {
+    dbg('App starting...');
+    dbg('FB: ' + (window.FB ? 'ok' : 'missing'));
+    if (!window.FB?.onAuthStateChanged) { dbg('No FB auth, setting fbChecked'); setFbChecked(true); return; }
+    dbg('Waiting for auth state...');
+    const unsub = window.FB.onAuthStateChanged(async (fbUser) => {
+      try {
+        dbg('Auth state: ' + (fbUser ? fbUser.email : 'null'));
+        if (fbUser) {
+          const nameParts = (fbUser.displayName || "").split(" ");
+          const u = {
+            name: fbUser.displayName || fbUser.email,
+            email: fbUser.email,
+            avatar: nameParts.map(w=>w[0]||"").join("").toUpperCase().slice(0,2) || "JD",
+            picture: fbUser.photoURL || null,
+            provider: "google",
+            uid: fbUser.uid,
+            joinedAt: new Date().toISOString(),
+          };
+          try { await window.FB.hydrateFromCloud(fbUser.uid); dbg('Hydrated'); } catch(e) { dbg('Hydrate err: '+e.message); }
+          lsSet("justdo_user", u);
+          setUser(u);
+          dbg('User set: ' + u.name);
+        }
+      } catch(e) {
+        dbg('Error: ' + e.message);
+      } finally {
+        dbg('fbChecked = true');
+        setFbChecked(true);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!inSandbox) return;
+    const handler = e => {
+      if (e.data?.type === '__activate_edit_mode')   { const el=document.getElementById('tweaks-root'); if(el) el.style.display='block'; }
+      if (e.data?.type === '__deactivate_edit_mode') { const el=document.getElementById('tweaks-root'); if(el) el.style.display='none'; }
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, [inSandbox]);
+
+  const handleLogin = (u) => { lsSet("justdo_user", u); setUser(u); };
+  const handleLogout = async () => {
+    if (window.FB?.signOut) await window.FB.signOut();
+    else { try { localStorage.removeItem("justdo_user"); } catch(e){} }
+    setUser(null);
+  };
+  const handleOnboarded = () => {
+    setUser(u => u ? { ...u, onboarded: true, _ts: Date.now() } : u);
+  };
+
+  if (!fbChecked) return (
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#09090E",padding:32,gap:16}}>
+      <div style={{width:40,height:40,borderRadius:20,border:"3px solid rgba(74,124,255,0.3)",borderTopColor:"#4A7CFF",animation:"spin 0.8s linear infinite"}}/>
+      <div id="debug-log" style={{fontSize:11,color:"rgba(255,255,255,0.4)",textAlign:"center",maxWidth:320,lineHeight:1.6,fontFamily:"monospace"}}></div>
+      <style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
+    </div>
+  );
+
+  const themeVariant = tweaks.activeVariant || "dark";
+  const needsOnboarding = user && !lsGet(`justdo_onboarded_${user.uid}`, false);
+
+  const makeContent = (v) => !user
+    ? <AuthScreen themeKey={v} onLogin={handleLogin} />
+    : needsOnboarding
+    ? <OnboardingScreen user={user} themeKey={v} onComplete={() => {
+        try { localStorage.setItem(`justdo_onboarded_${user.uid}`, JSON.stringify("1")); } catch(e) {}
+        handleOnboarded();
+      }} />
+    : <JustDoApp initialTheme={v} user={user} onLogout={handleLogout} />;
+
+  // Outside sandbox (Netlify, real device): always fullscreen
+  if (!inSandbox) return (
+    <div style={{position:"fixed",inset:0,overflow:"hidden"}}>
+      {makeContent(themeVariant)}
+    </div>
+  );
+
+  // Inside sandbox (design tool): show canvas with device frames
+  const variants = tweaks.showBothVariants ? ["dark","light"] : [themeVariant];
+  const labelColor = v => v==="dark" ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.35)";
+
+  return (
+    <>
+      <div className="canvas" style={{background:"radial-gradient(ellipse at 30% 50%, #1a1030 0%, #09090E 60%)",minHeight:"100vh"}}>
+        {variants.map(v => (
+          <div key={v} className="frame-col">
+            <span className="frame-label" style={{color:labelColor(v)}}>{v==="dark"?"Dark Mode":"Light Mode"}</span>
+            <IOSDevice statusBarStyle={v==="dark"?"light":"dark"}>{makeContent(v)}</IOSDevice>
+          </div>
+        ))}
+      </div>
+      <div id="tweaks-root" style={{display:'none'}}>
+        <TweaksPanel onClose={()=>{document.getElementById('tweaks-root').style.display='none';window.parent.postMessage({type:'__edit_mode_dismissed'},'*');}}>
+          <TweakSection title="Darstellung">
+            <TweakToggle label="Beide Varianten" value={tweaks.showBothVariants} onChange={v=>setTweak('showBothVariants',v)}/>
+            {!tweaks.showBothVariants && <TweakRadio label="Variante" options={["dark","light"]} value={tweaks.activeVariant} onChange={v=>setTweak('activeVariant',v)}/>}
+          </TweakSection>
+          <TweakSection title="Session">
+            <TweakButton label={user?`Abmelden (${user.name})`:"Nicht eingeloggt"} onClick={user?handleLogout:undefined}/>
+            <TweakButton label="Onboarding reset" onClick={()=>{if(user){try{localStorage.removeItem(`justdo_onboarded_${user.uid}`);}catch(e){}}setUser(u=>u?{...u,_ts:Date.now()}:u);}}/>
+          </TweakSection>
+        </TweaksPanel>
+      </div>
+    </>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+</script>
+<script>
+  // SW disabled — using no-cache headers instead
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+  }
+</script>
+</body>
+</html>

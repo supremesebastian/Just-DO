@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Just Do – AI Study Coach</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#4A7CFF" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <!-- iOS specific -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Just Do" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="apple-touch-startup-image" href="icon-512.png" />
+  <!-- iPad specific -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <script>
+    // Kill ALL service workers and caches immediately (fixes stale cache issues)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+      if (window.caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+    }
+  </script>
+  <script src="config.js"></script>
+  <!-- Firebase SDK (compat) with error handling -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadError='app'"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js" onerror="window._fbLoadError='auth'"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js" onerror="window._fbLoadError='firestore'"></script>
+  <script>
+    // If Firebase failed to load, create stubs so app still renders
+    if (!window.firebase) {
+      window.firebase = { apps: [], initializeApp: ()=>({}), auth: ()=>({ onAuthStateChanged: cb=>{ setTimeout(()=>cb(null),100); return ()=>{}; }, signInWithRedirect: ()=>Promise.resolve(), signOut: ()=>Promise.resolve(), getRedirectResult: ()=>Promise.resolve(null) }), firestore: ()=>({ enablePersistence: ()=>Promise.resolve(), collection: ()=>({}) }) };
+    }
+  </script>
+  <div id="root"></div>
+  <script src="shared-helpers.js?v=1777217016354"></script>
+  <script src="firebase-service.js" onerror="console.warn('firebase-service.js failed to load')"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; overflow-x: hidden;
+      transition: background 0.5s ease;
+      /* Safe area for notch/home indicator */
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+    .canvas {
+      display: flex; align-items: flex-start; justify-content: center;
+      gap: 48px; padding: 48px 40px;
+      min-height: 100vh; flex-wrap: wrap;
+    }
+    .frame-col {
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+    }
+    .frame-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+      font-weight: 500;
+    }
+    ::-webkit-scrollbar { display: none; }
+    * { scrollbar-width: none; }
+  </style>
+</head>
+<body>
+
+<script src="bundle.js?v=1777217016354"></script>
+<script>
+  // SW disabled — using no-cache headers instead
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+  }
+</script>
+</body>
+</html>

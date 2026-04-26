@@ -1,0 +1,25 @@
+[build]
+  publish = "web"
+  command = ""
+
+# SPA fallback so deep links resolve to index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Long-cache static assets, no-cache for HTML so updates ship instantly
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate"
+
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate"
