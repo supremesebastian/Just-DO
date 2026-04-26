@@ -2,129 +2,114 @@ import Foundation
 import Combine
 
 @MainActor
-final class TaskStore: ObservableObject {
-    @Published private(set) var lists: [TaskList] = []
-    @Published private(set) var tasks: [TaskItem] = []
+final class StudyStore: ObservableObject {
+    @Published private(set) var subjects: [Subject] = Subject.seed
+    @Published private(set) var todayPlan: [PlanTask] = StudyStore.seedPlan
+    @Published private(set) var exams: [Exam] = StudyStore.seedExams
+    @Published private(set) var streakDays: Int = 7
+    @Published private(set) var todayHoursPlanned: Double = 4.0
+    @Published private(set) var todayHoursDone: Double = 1.5
+    @Published var greetingName: String = "Max"
     @Published var isLoading: Bool = false
     @Published var loadError: String?
 
-    private let tasksURL: URL
-    private let listsURL: URL
+    private let planURL: URL
 
     init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        self.tasksURL = docs.appendingPathComponent("tasks.json")
-        self.listsURL = docs.appendingPathComponent("lists.json")
+        self.planURL = docs.appendingPathComponent("plan.json")
         load()
     }
 
-    func tasks(in list: TaskList) -> [TaskItem] {
-        if list.id == TaskList.today.id {
-            let cal = Calendar.current
-            return tasks
-                .filter { task in
-                    guard let due = task.dueDate else { return false }
-                    return cal.isDateInToday(due)
-                }
-                .sorted(by: sortRule)
-        }
-        return tasks
-            .filter { $0.listID == list.id }
-            .sorted(by: sortRule)
-    }
+    // MARK: - Plan tasks
 
-    private func sortRule(_ a: TaskItem, _ b: TaskItem) -> Bool {
-        if a.isDone != b.isDone { return !a.isDone }
-        return a.createdAt > b.createdAt
-    }
-
-    func add(title: String, notes: String, dueDate: Date?, list: TaskList) {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let target = list.id == TaskList.today.id ? TaskList.inbox : list
-        let task = TaskItem(
-            title: trimmed,
-            notes: notes,
-            dueDate: dueDate,
-            listID: target.id
-        )
-        tasks.append(task)
+    func toggle(_ task: PlanTask) {
+        guard let idx = todayPlan.firstIndex(where: { $0.id == task.id }) else { return }
+        todayPlan[idx].done.toggle()
+        recomputeProgress()
         persist()
     }
 
-    func update(_ task: TaskItem) {
-        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        tasks[idx] = task
+    func delete(_ task: PlanTask) {
+        todayPlan.removeAll { $0.id == task.id }
+        recomputeProgress()
         persist()
     }
 
-    func toggleDone(_ task: TaskItem) {
-        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        tasks[idx].isDone.toggle()
+    func add(_ task: PlanTask) {
+        todayPlan.append(task)
+        todayPlan.sort { $0.time < $1.time }
+        recomputeProgress()
         persist()
     }
 
-    func delete(_ task: TaskItem) {
-        tasks.removeAll { $0.id == task.id }
-        persist()
+    var todayProgress: Double {
+        guard todayHoursPlanned > 0 else { return 0 }
+        return min(1.0, todayHoursDone / todayHoursPlanned)
     }
 
-    func delete(at offsets: IndexSet, in list: TaskList) {
-        let visible = tasks(in: list)
-        let ids = offsets.map { visible[$0].id }
-        tasks.removeAll { ids.contains($0.id) }
-        persist()
+    var doneCount: Int  { todayPlan.filter { $0.done }.count }
+    var totalCount: Int { todayPlan.count }
+
+    private func recomputeProgress() {
+        let totalMinutes = todayPlan.reduce(0) { $0 + $1.durationMinutes }
+        let doneMinutes  = todayPlan.filter { $0.done }.reduce(0) { $0 + $1.durationMinutes }
+        todayHoursPlanned = Double(totalMinutes) / 60.0
+        todayHoursDone    = Double(doneMinutes) / 60.0
     }
 
-    func addList(name: String, symbol: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        lists.append(TaskList(name: trimmed, symbol: symbol))
-        persist()
-    }
-
-    func deleteCustomList(_ list: TaskList) {
-        guard list.id != TaskList.inbox.id, list.id != TaskList.today.id else { return }
-        lists.removeAll { $0.id == list.id }
-        tasks.removeAll { $0.listID == list.id }
-        persist()
-    }
-
-    var systemLists: [TaskList] { [TaskList.today, TaskList.inbox] }
-    var customLists: [TaskList] { lists }
-
-    func openCount(for list: TaskList) -> Int {
-        tasks(in: list).filter { !$0.isDone }.count
-    }
+    // MARK: - Persistence
 
     private func load() {
         isLoading = true
         defer { isLoading = false }
         do {
-            if FileManager.default.fileExists(atPath: tasksURL.path) {
-                let data = try Data(contentsOf: tasksURL)
-                tasks = try JSONDecoder().decode([TaskItem].self, from: data)
+            if FileManager.default.fileExists(atPath: planURL.path) {
+                let data = try Data(contentsOf: planURL)
+                let decoded = try JSONDecoder().decode([PlanTask].self, from: data)
+                if !decoded.isEmpty { todayPlan = decoded }
             }
-            if FileManager.default.fileExists(atPath: listsURL.path) {
-                let data = try Data(contentsOf: listsURL)
-                lists = try JSONDecoder().decode([TaskList].self, from: data)
-            }
+            recomputeProgress()
             loadError = nil
         } catch {
-            loadError = "Could not load saved tasks. Starting fresh."
-            tasks = []
-            lists = []
+            loadError = "Konnte den Tagesplan nicht laden – starte mit den Standardwerten."
+            todayPlan = StudyStore.seedPlan
+            recomputeProgress()
         }
     }
 
     private func persist() {
         do {
-            let tasksData = try JSONEncoder().encode(tasks)
-            try tasksData.write(to: tasksURL, options: .atomic)
-            let listsData = try JSONEncoder().encode(lists)
-            try listsData.write(to: listsURL, options: .atomic)
+            let data = try JSONEncoder().encode(todayPlan)
+            try data.write(to: planURL, options: .atomic)
         } catch {
-            loadError = "Could not save changes locally."
+            loadError = "Änderungen am Plan konnten nicht gespeichert werden."
         }
     }
+
+    // MARK: - Seed data
+
+    static let seedPlan: [PlanTask] = [
+        PlanTask(time: "08:00", durationMinutes: 90, subjectName: "Mathematik II",    label: "Integralrechnung – Kap. 4", type: .study,     done: true),
+        PlanTask(time: "09:30", durationMinutes: 30, subjectName: nil,                label: "Pause & Bewegung",            type: .breakTime, done: true),
+        PlanTask(time: "10:00", durationMinutes: 60, subjectName: "Statistik",        label: "Übungsblatt 7 lösen",         type: .practice,  done: false),
+        PlanTask(time: "11:00", durationMinutes: 45, subjectName: "Wirtschaftsrecht", label: "Zusammenfassung lesen",       type: .review,    done: false),
+        PlanTask(time: "12:00", durationMinutes: 60, subjectName: nil,                label: "Mittagspause",                type: .breakTime, done: false),
+        PlanTask(time: "13:00", durationMinutes: 90, subjectName: "Marketing",        label: "Fallstudie Analyse",          type: .study,     done: false),
+        PlanTask(time: "14:30", durationMinutes: 25, subjectName: nil,                label: "Pomodoro – Deep Work",        type: .focus,     done: false),
+        PlanTask(time: "16:00", durationMinutes: 60, subjectName: "Statistik",        label: "Karteikarten wiederholen",    type: .review,    done: false),
+    ]
+
+    static let seedExams: [Exam] = {
+        let cal = Calendar.current
+        func d(_ days: Int) -> Date { cal.date(byAdding: .day, value: days, to: cal.startOfDay(for: Date()))! }
+        return [
+            Exam(id: UUID(), name: "Klausur Wirtschaftsrecht", subjectName: "Wirtschaftsrecht", subjectColorHex: 0x34C7A0, date: d(2),  time: "10:00", location: "Hörsaal 3"),
+            Exam(id: UUID(), name: "Statistik Midterm",        subjectName: "Statistik",        subjectColorHex: 0x7C6EFA, date: d(12), time: "09:00", location: "Audimax"),
+            Exam(id: UUID(), name: "Mathematik II Klausur",    subjectName: "Mathematik II",    subjectColorHex: 0x4A7CFF, date: d(51), time: "08:30", location: "Hörsaal A"),
+        ]
+    }()
 }
+
+// Legacy alias
+typealias TaskStore = StudyStore
