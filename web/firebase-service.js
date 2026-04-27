@@ -71,14 +71,8 @@ async function signInWithGoogle() {
     await auth.signInWithRedirect(provider);
     return null; // page will reload after redirect
   } catch(e) {
-    console.warn("[FB] signInWithRedirect failed:", e.message);
-    // Fallback to popup
-    try {
-      const result = await auth.signInWithPopup(provider);
-      return result.user;
-    } catch(e2) {
-      throw e2;
-    }
+    console.error("[FB] signInWithRedirect failed:", e);
+    throw e;
   }
 }
 
